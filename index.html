@@ -19,6 +19,9 @@ li.on{border-color:var(--ac);box-shadow:inset 3px 0 0 var(--ac)}
 li .t{font-family:ui-monospace,monospace;color:var(--ac);font-weight:600;white-space:nowrap}
 li .l{flex:1;min-width:0}
 li.sub{margin-left:22px}
+li .x{padding:2px 10px;font-size:14px;border-radius:8px;color:#b42318;border-color:#f1c4bf;background:transparent}
+li.dropped{opacity:.45}li.dropped .l{text-decoration:line-through}li.dropped .x{color:var(--ac);border-color:var(--bd)}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1c1b19;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;max-width:92vw;display:none}
 .sum{display:flex;flex-wrap:wrap;gap:6px 18px;margin:-4px 0 10px;color:var(--mut);font-size:14px}.sum b{color:var(--fg);font-variant-numeric:tabular-nums}
 .prog{height:6px;background:var(--bd);border-radius:3px;margin:0 0 12px;overflow:hidden}.prog i{display:block;height:100%;width:0;background:var(--ac)}
 .au{display:flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
@@ -29,12 +32,13 @@ li.sub{margin-left:22px}
 <div class="pf"><div id="p"></div></div>
 <div class="bar"><button class="pri" id="all">▶ 처음부터 전체 이어 보기</button><button id="prev">◀ 이전 편집점</button><button id="replay">↺ 이 편집점 다시</button><button id="nextseg">다음 조각 ▶</button><button id="next">다음 편집점 ▶▶</button><label class="au"><input type="checkbox" id="auto"> 끝나면 다음 편집점 자동 재생</label><span id="st"></span></div>
 <ol id="list"></ol>
+<div id="toast"></div>
 </main>
 <script>
 const q=new URLSearchParams(location.search);
 const VID=q.get("v")||"";
 const fmt=s=>{s=Math.round(s);const h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")};
-// v=영상ID  s=시작-끝,시작-끝  n=라벨|라벨  g=편집점번호,편집점번호(조각마다)  k=시작 편집점 순번  a=1 자동 이어보기
+// i=편집점 ID(편집점마다)  v=영상ID  s=시작-끝,시작-끝  n=라벨|라벨  g=편집점번호,편집점번호(조각마다)  k=시작 편집점 순번  a=1 자동 이어보기
 const labels=(q.get("n")||"").split("|");
 const gids=(q.get("g")||"").split(",");
 const SEG=(q.get("s")||"").split(",").filter(Boolean).map((p,i)=>{const [a,b]=p.split("-").map(Number);return {a,b,l:labels[i]||"",g:gids[i]!==undefined&&gids[i]!==""?gids[i]:String(i)}});
@@ -43,23 +47,27 @@ document.getElementById("ttl").textContent=q.get("t")||"구간 재생";
 document.title=q.get("t")||"구간 재생";
 const auto=document.getElementById("auto"); auto.checked=q.get("a")==="1";
 const list=document.getElementById("list");
-list.innerHTML=SEG.map((g,i)=>`<li data-i="${i}" class="${i>0&&SEG[i-1].g===g.g?"sub":""}"><span class="t">${fmt(g.a)}~${fmt(g.b)}</span><span class="l"></span></li>`).join("");
+const IDS=(q.get("i")||"").split(",");
+const DROP=new Set();
+list.innerHTML=SEG.map((g,i)=>{ const first=!(i>0&&SEG[i-1].g===g.g); return `<li data-i="${i}" data-g="${g.g}" class="${first?"":"sub"}"><span class="t">${fmt(g.a)}~${fmt(g.b)}</span><span class="l"></span>${first?`<button class="x" data-x="${g.g}" title="이 편집점 빼기 (결재 페이지에서 2순위로)">✕</button>`:""}</li>`; }).join("");
 [...list.children].forEach((li,i)=>li.querySelector(".l").textContent=SEG[i].l);
 let P,cur=-1,loaded=false;
 const st=t=>document.getElementById("st").textContent=t;
 const gi=i=>GROUPS.indexOf(SEG[i].g);
 const firstOf=k=>SEG.findIndex(x=>x.g===GROUPS[k]);
 function mark(){[...list.children].forEach((li,i)=>li.classList.toggle("on",i===cur)); const on=list.children[cur]; on&&on.scrollIntoView({block:"nearest"});}
-function go(i){ if(i<0||i>=SEG.length){ P&&P.pauseVideo(); st("끝"); cur=-1; mark(); return; } cur=i; mark();
+function go(i){ while(i>=0&&i<SEG.length&&DROP.has(SEG[i].g)) i++; if(i<0||i>=SEG.length){ P&&P.pauseVideo(); st("끝"); cur=-1; mark(); return; } cur=i; mark();
   if(loaded){ P.seekTo(SEG[i].a,true); P.playVideo(); } else { P.loadVideoById({videoId:VID,startSeconds:SEG[i].a}); loaded=true; } st(`편집점 ${gi(i)+1}/${GROUPS.length} · ${fmt(SEG[i].a)}~${fmt(SEG[i].b)}`); }
 function goGroup(k){ if(k<0) k=0; if(k>=GROUPS.length){ P.pauseVideo(); st("마지막 편집점입니다"); return; } go(firstOf(k)); }
 function tick(){ if(!P||cur<0||!P.getCurrentTime) return; const t=P.getCurrentTime();
-  if(t>=SEG[cur].b-0.15){ const nx=cur+1, same=nx<SEG.length&&SEG[nx].g===SEG[cur].g;
+  if(t>=SEG[cur].b-0.15){ let nx=cur+1; while(nx<SEG.length&&DROP.has(SEG[nx].g)) nx++; const same=nx<SEG.length&&SEG[nx].g===SEG[cur].g;
     if(same||(auto.checked&&nx<SEG.length)) go(nx); else { P.pauseVideo(); st(`편집점 ${gi(cur)+1}/${GROUPS.length} 끝에서 멈춤`); cur=-1; mark(); } } }
-const TOT=SEG.reduce((s,g)=>s+(g.b-g.a),0);
-const BEFORE=SEG.map((g,i)=>SEG.slice(0,i).reduce((s,x)=>s+(x.b-x.a),0));
-document.getElementById("tot").textContent=fmt(TOT); document.getElementById("tot2").textContent=fmt(TOT);
-document.getElementById("cnt").textContent=GROUPS.length+"개 · "+SEG.length+"조각";
+let TOT=0, BEFORE=[];
+function recalc(){ const live=SEG.map(g=>!DROP.has(g.g)); TOT=SEG.reduce((s,g,i)=>s+(live[i]?g.b-g.a:0),0); let acc=0; BEFORE=SEG.map((g,i)=>{ const v=acc; if(live[i]) acc+=g.b-g.a; return v; });
+  document.getElementById("tot").textContent=fmt(TOT); document.getElementById("tot2").textContent=fmt(TOT);
+  const ng=GROUPS.filter(x=>!DROP.has(x)).length; document.getElementById("cnt").textContent=ng+"개 · "+SEG.filter(g=>!DROP.has(g.g)).length+"조각"+(DROP.size?` (뺀 것 ${DROP.size}개)`:"");
+  [...list.children].forEach((li,i)=>{ li.classList.toggle("dropped",DROP.has(SEG[i].g)); const x=li.querySelector(".x"); if(x){ x.textContent=DROP.has(SEG[i].g)?"되살리기":"✕"; } }); }
+recalc();
 setInterval(()=>{ if(!P||!P.getCurrentTime||cur<0) return; const el=BEFORE[cur]+Math.max(0,Math.min(SEG[cur].b,P.getCurrentTime())-SEG[cur].a);
   document.getElementById("el").textContent=fmt(el); document.getElementById("pg").style.width=(TOT?100*el/TOT:0)+"%"; },250);
 const K=Math.max(0,Math.min(GROUPS.length-1,+(q.get("k")||0)));
@@ -71,7 +79,15 @@ document.getElementById("next").onclick=()=>goGroup(curG()+1);
 document.getElementById("nextseg").onclick=()=>{ const i=cur>=0?cur:firstOf(last); go(i+1); };
 document.getElementById("prev").onclick=()=>goGroup(curG()-1);
 setInterval(()=>{ if(cur>=0) last=gi(cur); },200);
-list.onclick=e=>{const li=e.target.closest("li"); if(li) go(+li.dataset.i)};
+const toast=(t,ms)=>{ const el=document.getElementById("toast"); el.textContent=t; el.style.display="block"; clearTimeout(toast.h); toast.h=setTimeout(()=>el.style.display="none",ms||3500); };
+const pending={};
+addEventListener("message",e=>{ const d=e.data; if(!d||d.type!=="kirei-ack") return; clearTimeout(pending[d.id]); delete pending[d.id]; toast(d.drop?`결재 페이지에서 ${d.no}번을 2순위로 내렸습니다`:`결재 페이지에서 ${d.no}번을 다시 1순위로 올렸습니다`); });
+function sendDrop(g,drop){ const id=IDS[+g]; const lab=(SEG.find(x=>x.g===g)||{}).l||""; const no=(lab.match(/^(\d+)번/)||[])[1]||"";
+  let sent=false; try{ if(window.opener&&id){ window.opener.postMessage({type:"kirei-drop",id,drop},"*"); sent=true; } }catch(_){}
+  if(!sent){ toast(`결재 페이지와 연결이 안 돼 있습니다. 결재 페이지에서 ${no}번을 직접 ${drop?"빼기":"살림"}으로 눌러 주세요.`,6000); return; }
+  pending[id]=setTimeout(()=>toast(`결재 페이지 응답이 없습니다. 결재 페이지에서 ${no}번을 직접 ${drop?"빼기":"살림"}으로 눌러 주세요.`,6000),1500); }
+list.onclick=e=>{ const x=e.target.closest("[data-x]"); if(x){ const g=x.dataset.x, drop=!DROP.has(g); drop?DROP.add(g):DROP.delete(g); recalc(); if(drop&&cur>=0&&SEG[cur].g===g){ goGroup(gi(cur)+1); } sendDrop(g,drop); return; }
+  const li=e.target.closest("li"); if(li) go(+li.dataset.i) };
 if(!VID||!SEG.length) st("주소에 v(영상 ID)와 s(구간)가 필요합니다.");
 const sc=document.createElement("script"); sc.src="https://www.youtube.com/iframe_api"; document.head.appendChild(sc);
 </script></body></html>
