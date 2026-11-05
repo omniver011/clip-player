@@ -19,9 +19,13 @@ li.on{border-color:var(--ac);box-shadow:inset 3px 0 0 var(--ac)}
 li .t{font-family:ui-monospace,monospace;color:var(--ac);font-weight:600;white-space:nowrap}
 li .l{flex:1;min-width:0}
 li.sub{margin-left:22px}
+.sum{display:flex;flex-wrap:wrap;gap:6px 18px;margin:-4px 0 10px;color:var(--mut);font-size:14px}.sum b{color:var(--fg);font-variant-numeric:tabular-nums}
+.prog{height:6px;background:var(--bd);border-radius:3px;margin:0 0 12px;overflow:hidden}.prog i{display:block;height:100%;width:0;background:var(--ac)}
 .au{display:flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
 </style></head><body><main>
 <h1 id="ttl">구간 재생</h1>
+<div class="sum"><span>총 길이 <b id="tot">-</b></span><span>편집점 <b id="cnt">-</b></span><span>지금 <b id="el">0:00</b> / <b id="tot2">-</b></span></div>
+<div class="prog"><i id="pg"></i></div>
 <div class="pf"><div id="p"></div></div>
 <div class="bar"><button class="pri" id="all">▶ 처음부터 전체 이어 보기</button><button id="prev">◀ 이전 편집점</button><button id="replay">↺ 이 편집점 다시</button><button id="nextseg">다음 조각 ▶</button><button id="next">다음 편집점 ▶▶</button><label class="au"><input type="checkbox" id="auto"> 끝나면 다음 편집점 자동 재생</label><span id="st"></span></div>
 <ol id="list"></ol>
@@ -52,6 +56,12 @@ function goGroup(k){ if(k<0) k=0; if(k>=GROUPS.length){ P.pauseVideo(); st("마�
 function tick(){ if(!P||cur<0||!P.getCurrentTime) return; const t=P.getCurrentTime();
   if(t>=SEG[cur].b-0.15){ const nx=cur+1, same=nx<SEG.length&&SEG[nx].g===SEG[cur].g;
     if(same||(auto.checked&&nx<SEG.length)) go(nx); else { P.pauseVideo(); st(`편집점 ${gi(cur)+1}/${GROUPS.length} 끝에서 멈춤`); cur=-1; mark(); } } }
+const TOT=SEG.reduce((s,g)=>s+(g.b-g.a),0);
+const BEFORE=SEG.map((g,i)=>SEG.slice(0,i).reduce((s,x)=>s+(x.b-x.a),0));
+document.getElementById("tot").textContent=fmt(TOT); document.getElementById("tot2").textContent=fmt(TOT);
+document.getElementById("cnt").textContent=GROUPS.length+"개 · "+SEG.length+"조각";
+setInterval(()=>{ if(!P||!P.getCurrentTime||cur<0) return; const el=BEFORE[cur]+Math.max(0,Math.min(SEG[cur].b,P.getCurrentTime())-SEG[cur].a);
+  document.getElementById("el").textContent=fmt(el); document.getElementById("pg").style.width=(TOT?100*el/TOT:0)+"%"; },250);
 const K=Math.max(0,Math.min(GROUPS.length-1,+(q.get("k")||0)));
 window.onYouTubeIframeAPIReady=()=>{ P=new YT.Player("p",{videoId:VID,playerVars:{start:SEG.length?SEG[firstOf(K)].a:0,rel:0,playsinline:1},events:{onReady:()=>{ if(SEG.length) go(firstOf(K)); }}}); setInterval(tick,100); };
 let last=0; const curG=()=>cur>=0?gi(cur):last;
