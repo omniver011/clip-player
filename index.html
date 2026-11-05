@@ -48,25 +48,28 @@ document.title=q.get("t")||"구간 재생";
 const auto=document.getElementById("auto"); auto.checked=q.get("a")==="1";
 const list=document.getElementById("list");
 const IDS=(q.get("i")||"").split(",");
-const DROP=new Set();
-list.innerHTML=SEG.map((g,i)=>{ const first=!(i>0&&SEG[i-1].g===g.g); return `<li data-i="${i}" data-g="${g.g}" class="${first?"":"sub"}"><span class="t">${fmt(g.a)}~${fmt(g.b)}</span><span class="l"></span>${first?`<button class="x" data-x="${g.g}" title="이 편집점 빼기 (결재 페이지에서 2순위로)">✕</button>`:""}</li>`; }).join("");
+const DROP=new Set(), PDROP=new Set();
+const multi=g=>SEG.filter(x=>x.g===g).length>1;
+const pieceK=i=>i-SEG.findIndex(x=>x.g===SEG[i].g);
+const isOff=i=>DROP.has(SEG[i].g)||PDROP.has(i);
+list.innerHTML=SEG.map((g,i)=>{ const first=!(i>0&&SEG[i-1].g===g.g); return `<li data-i="${i}" data-g="${g.g}" class="${first?"":"sub"}"><span class="t">${fmt(g.a)}~${fmt(g.b)}</span><span class="l"></span>${multi(g.g)?`<button class="x xp" data-xp="${i}" title="이 조각만 빼기">조각 ✕</button>`:""}${first?`<button class="x" data-x="${g.g}" title="이 편집점 전체 빼기 (결재 페이지에서 2순위로)">${multi(g.g)?"전체 ✕":"✕"}</button>`:""}</li>`; }).join("");
 [...list.children].forEach((li,i)=>li.querySelector(".l").textContent=SEG[i].l);
 let P,cur=-1,loaded=false;
 const st=t=>document.getElementById("st").textContent=t;
 const gi=i=>GROUPS.indexOf(SEG[i].g);
 const firstOf=k=>SEG.findIndex(x=>x.g===GROUPS[k]);
 function mark(){[...list.children].forEach((li,i)=>li.classList.toggle("on",i===cur)); const on=list.children[cur]; on&&on.scrollIntoView({block:"nearest"});}
-function go(i){ while(i>=0&&i<SEG.length&&DROP.has(SEG[i].g)) i++; if(i<0||i>=SEG.length){ P&&P.pauseVideo(); st("끝"); cur=-1; mark(); return; } cur=i; mark();
+function go(i){ while(i>=0&&i<SEG.length&&isOff(i)) i++; if(i<0||i>=SEG.length){ P&&P.pauseVideo(); st("끝"); cur=-1; mark(); return; } cur=i; mark();
   if(loaded){ P.seekTo(SEG[i].a,true); P.playVideo(); } else { P.loadVideoById({videoId:VID,startSeconds:SEG[i].a}); loaded=true; } st(`편집점 ${gi(i)+1}/${GROUPS.length} · ${fmt(SEG[i].a)}~${fmt(SEG[i].b)}`); }
 function goGroup(k){ if(k<0) k=0; if(k>=GROUPS.length){ P.pauseVideo(); st("마지막 편집점입니다"); return; } go(firstOf(k)); }
 function tick(){ if(!P||cur<0||!P.getCurrentTime) return; const t=P.getCurrentTime();
-  if(t>=SEG[cur].b-0.15){ let nx=cur+1; while(nx<SEG.length&&DROP.has(SEG[nx].g)) nx++; const same=nx<SEG.length&&SEG[nx].g===SEG[cur].g;
+  if(t>=SEG[cur].b-0.15){ let nx=cur+1; while(nx<SEG.length&&isOff(nx)) nx++; const same=nx<SEG.length&&SEG[nx].g===SEG[cur].g;
     if(same||(auto.checked&&nx<SEG.length)) go(nx); else { P.pauseVideo(); st(`편집점 ${gi(cur)+1}/${GROUPS.length} 끝에서 멈춤`); cur=-1; mark(); } } }
 let TOT=0, BEFORE=[];
-function recalc(){ const live=SEG.map(g=>!DROP.has(g.g)); TOT=SEG.reduce((s,g,i)=>s+(live[i]?g.b-g.a:0),0); let acc=0; BEFORE=SEG.map((g,i)=>{ const v=acc; if(live[i]) acc+=g.b-g.a; return v; });
+function recalc(){ const live=SEG.map((g,i)=>!isOff(i)); TOT=SEG.reduce((s,g,i)=>s+(live[i]?g.b-g.a:0),0); let acc=0; BEFORE=SEG.map((g,i)=>{ const v=acc; if(live[i]) acc+=g.b-g.a; return v; });
   document.getElementById("tot").textContent=fmt(TOT); document.getElementById("tot2").textContent=fmt(TOT);
-  const ng=GROUPS.filter(x=>!DROP.has(x)).length; document.getElementById("cnt").textContent=ng+"개 · "+SEG.filter(g=>!DROP.has(g.g)).length+"조각"+(DROP.size?` (뺀 것 ${DROP.size}개)`:"");
-  [...list.children].forEach((li,i)=>{ li.classList.toggle("dropped",DROP.has(SEG[i].g)); const x=li.querySelector(".x"); if(x){ x.textContent=DROP.has(SEG[i].g)?"되살리기":"✕"; } }); }
+  const ng=GROUPS.filter(x=>!DROP.has(x)).length; document.getElementById("cnt").textContent=ng+"개 · "+live.filter(Boolean).length+"조각"+(DROP.size||PDROP.size?` (뺀 편집점 ${DROP.size}개 · 뺀 조각 ${PDROP.size}개)`:"");
+  [...list.children].forEach((li,i)=>{ li.classList.toggle("dropped",isOff(i)); const x=li.querySelector("[data-x]"); if(x){ x.textContent=DROP.has(SEG[i].g)?"되살리기":(multi(SEG[i].g)?"전체 ✕":"✕"); } const xp=li.querySelector("[data-xp]"); if(xp){ xp.textContent=PDROP.has(i)?"조각 되살리기":"조각 ✕"; xp.hidden=DROP.has(SEG[i].g); } }); }
 recalc();
 setInterval(()=>{ if(!P||!P.getCurrentTime||cur<0) return; const el=BEFORE[cur]+Math.max(0,Math.min(SEG[cur].b,P.getCurrentTime())-SEG[cur].a);
   document.getElementById("el").textContent=fmt(el); document.getElementById("pg").style.width=(TOT?100*el/TOT:0)+"%"; },250);
@@ -81,12 +84,18 @@ document.getElementById("prev").onclick=()=>goGroup(curG()-1);
 setInterval(()=>{ if(cur>=0) last=gi(cur); },200);
 const toast=(t,ms)=>{ const el=document.getElementById("toast"); el.textContent=t; el.style.display="block"; clearTimeout(toast.h); toast.h=setTimeout(()=>el.style.display="none",ms||3500); };
 const pending={};
-addEventListener("message",e=>{ const d=e.data; if(!d||d.type!=="kirei-ack") return; clearTimeout(pending[d.id]); delete pending[d.id]; toast(d.drop?`결재 페이지에서 ${d.no}번을 2순위로 내렸습니다`:`결재 페이지에서 ${d.no}번을 다시 1순위로 올렸습니다`); });
+addEventListener("message",e=>{ const d=e.data; if(!d||d.type!=="kirei-ack") return; clearTimeout(pending[d.id]); delete pending[d.id]; if(d.piece){ toast(`결재 페이지에서 ${d.no}번 ${d.piece}조각을 ${d.drop?"뺐습니다":"되살렸습니다"}`); return; } toast(d.drop?`결재 페이지에서 ${d.no}번을 2순위로 내렸습니다`:`결재 페이지에서 ${d.no}번을 다시 1순위로 올렸습니다`); });
 function sendDrop(g,drop){ const id=IDS[+g]; const lab=(SEG.find(x=>x.g===g)||{}).l||""; const no=(lab.match(/^(\d+)번/)||[])[1]||"";
   let sent=false; try{ if(window.opener&&id){ window.opener.postMessage({type:"kirei-drop",id,drop},"*"); sent=true; } }catch(_){}
   if(!sent){ toast(`결재 페이지와 연결이 안 돼 있습니다. 결재 페이지에서 ${no}번을 직접 ${drop?"빼기":"살림"}으로 눌러 주세요.`,6000); return; }
   pending[id]=setTimeout(()=>toast(`결재 페이지 응답이 없습니다. 결재 페이지에서 ${no}번을 직접 ${drop?"빼기":"살림"}으로 눌러 주세요.`,6000),1500); }
-list.onclick=e=>{ const x=e.target.closest("[data-x]"); if(x){ const g=x.dataset.x, drop=!DROP.has(g); drop?DROP.add(g):DROP.delete(g); recalc(); if(drop&&cur>=0&&SEG[cur].g===g){ goGroup(gi(cur)+1); } sendDrop(g,drop); return; }
+function sendPiece(i,drop){ const g=SEG[i].g, id=IDS[+g], k=pieceK(i); const no=((SEG[i].l||"").match(/^(\d+)번/)||[])[1]||"";
+  let sent=false; try{ if(window.opener&&id){ window.opener.postMessage({type:"kirei-piece",id,k,drop},"*"); sent=true; } }catch(_){}
+  const msg=`결재 페이지에서 ${no}번 ${k+1}조각을 직접 ${drop?"빼":"되살려"} 주세요.`;
+  if(!sent){ toast("결재 페이지와 연결이 안 돼 있습니다. "+msg,6000); return; }
+  pending[id]=setTimeout(()=>toast("결재 페이지 응답이 없습니다. "+msg,6000),1500); }
+list.onclick=e=>{ const xp=e.target.closest("[data-xp]"); if(xp){ const i=+xp.dataset.xp, drop=!PDROP.has(i); drop?PDROP.add(i):PDROP.delete(i); recalc(); if(drop&&cur===i){ go(i+1); } sendPiece(i,drop); return; }
+  const x=e.target.closest("[data-x]"); if(x){ const g=x.dataset.x, drop=!DROP.has(g); drop?DROP.add(g):DROP.delete(g); recalc(); if(drop&&cur>=0&&SEG[cur].g===g){ goGroup(gi(cur)+1); } sendDrop(g,drop); return; }
   const li=e.target.closest("li"); if(li) go(+li.dataset.i) };
 if(!VID||!SEG.length) st("주소에 v(영상 ID)와 s(구간)가 필요합니다.");
 const sc=document.createElement("script"); sc.src="https://www.youtube.com/iframe_api"; document.head.appendChild(sc);
