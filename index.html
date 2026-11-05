@@ -18,36 +18,50 @@ li{display:flex;gap:10px;align-items:center;padding:8px 12px;border:1px solid va
 li.on{border-color:var(--ac);box-shadow:inset 3px 0 0 var(--ac)}
 li .t{font-family:ui-monospace,monospace;color:var(--ac);font-weight:600;white-space:nowrap}
 li .l{flex:1;min-width:0}
+li.sub{margin-left:22px}
+.au{display:flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
 </style></head><body><main>
 <h1 id="ttl">구간 재생</h1>
 <div class="pf"><div id="p"></div></div>
-<div class="bar"><button class="pri" id="play">▶ 처음부터</button><button id="replay">↺ 이 조각 다시</button><button id="next">다음 조각 ▶</button><span id="st"></span></div>
+<div class="bar"><button class="pri" id="all">▶ 처음부터 전체 이어 보기</button><button id="prev">◀ 이전 편집점</button><button id="replay">↺ 이 편집점 다시</button><button id="nextseg">다음 조각 ▶</button><button id="next">다음 편집점 ▶▶</button><label class="au"><input type="checkbox" id="auto"> 끝나면 다음 편집점 자동 재생</label><span id="st"></span></div>
 <ol id="list"></ol>
 </main>
 <script>
 const q=new URLSearchParams(location.search);
 const VID=q.get("v")||"";
 const fmt=s=>{s=Math.round(s);const h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")};
-// s=3587-3616,3669-3857   labels optional: n=라벨1|라벨2 (조각마다)
+// v=영상ID  s=시작-끝,시작-끝  n=라벨|라벨  g=편집점번호,편집점번호(조각마다)  k=시작 편집점 순번  a=1 자동 이어보기
 const labels=(q.get("n")||"").split("|");
-const SEG=(q.get("s")||"").split(",").filter(Boolean).map((p,i)=>{const [a,b]=p.split("-").map(Number);return {a,b,l:labels[i]||""}});
+const gids=(q.get("g")||"").split(",");
+const SEG=(q.get("s")||"").split(",").filter(Boolean).map((p,i)=>{const [a,b]=p.split("-").map(Number);return {a,b,l:labels[i]||"",g:gids[i]!==undefined&&gids[i]!==""?gids[i]:String(i)}});
+const GROUPS=[...new Set(SEG.map(x=>x.g))];
 document.getElementById("ttl").textContent=q.get("t")||"구간 재생";
-document.title=(q.get("t")||"구간 재생");
+document.title=q.get("t")||"구간 재생";
+const auto=document.getElementById("auto"); auto.checked=q.get("a")==="1";
 const list=document.getElementById("list");
-list.innerHTML=SEG.map((g,i)=>`<li data-i="${i}"><span class="t">${fmt(g.a)}~${fmt(g.b)}</span><span class="l"></span></li>`).join("");
-[...list.children].forEach((li,i)=>li.querySelector(".l").textContent=SEG[i].l||(SEG.length>1?(i+1)+"조각":""));
-let P,cur=-1,timer=null,auto=true;
+list.innerHTML=SEG.map((g,i)=>`<li data-i="${i}" class="${i>0&&SEG[i-1].g===g.g?"sub":""}"><span class="t">${fmt(g.a)}~${fmt(g.b)}</span><span class="l"></span></li>`).join("");
+[...list.children].forEach((li,i)=>li.querySelector(".l").textContent=SEG[i].l);
+let P,cur=-1,loaded=false;
 const st=t=>document.getElementById("st").textContent=t;
-function mark(){[...list.children].forEach((li,i)=>li.classList.toggle("on",i===cur))}
+const gi=i=>GROUPS.indexOf(SEG[i].g);
+const firstOf=k=>SEG.findIndex(x=>x.g===GROUPS[k]);
+function mark(){[...list.children].forEach((li,i)=>li.classList.toggle("on",i===cur)); const on=list.children[cur]; on&&on.scrollIntoView({block:"nearest"});}
 function go(i){ if(i<0||i>=SEG.length){ P&&P.pauseVideo(); st("끝"); cur=-1; mark(); return; } cur=i; mark();
-  P.loadVideoById({videoId:VID,startSeconds:SEG[i].a}); st(`${i+1}/${SEG.length} 재생 중 · ${fmt(SEG[i].a)}~${fmt(SEG[i].b)}`); }
+  if(loaded){ P.seekTo(SEG[i].a,true); P.playVideo(); } else { P.loadVideoById({videoId:VID,startSeconds:SEG[i].a}); loaded=true; } st(`편집점 ${gi(i)+1}/${GROUPS.length} · ${fmt(SEG[i].a)}~${fmt(SEG[i].b)}`); }
+function goGroup(k){ if(k<0) k=0; if(k>=GROUPS.length){ P.pauseVideo(); st("마지막 편집점입니다"); return; } go(firstOf(k)); }
 function tick(){ if(!P||cur<0||!P.getCurrentTime) return; const t=P.getCurrentTime();
-  if(t>=SEG[cur].b-0.15){ if(auto&&cur+1<SEG.length) go(cur+1); else { P.pauseVideo(); st(`${cur+1}/${SEG.length} 끝에서 멈춤`); cur=-1; mark(); } } }
-window.onYouTubeIframeAPIReady=()=>{ P=new YT.Player("p",{videoId:VID,playerVars:{start:SEG[0]?SEG[0].a:0,rel:0,playsinline:1},events:{onReady:()=>{ if(SEG.length) go(0); }}}); timer=setInterval(tick,100); };
-document.getElementById("play").onclick=()=>go(0);
-document.getElementById("replay").onclick=()=>go(Math.max(cur,0));
-document.getElementById("next").onclick=()=>go(cur+1);
+  if(t>=SEG[cur].b-0.15){ const nx=cur+1, same=nx<SEG.length&&SEG[nx].g===SEG[cur].g;
+    if(same||(auto.checked&&nx<SEG.length)) go(nx); else { P.pauseVideo(); st(`편집점 ${gi(cur)+1}/${GROUPS.length} 끝에서 멈춤`); cur=-1; mark(); } } }
+const K=Math.max(0,Math.min(GROUPS.length-1,+(q.get("k")||0)));
+window.onYouTubeIframeAPIReady=()=>{ P=new YT.Player("p",{videoId:VID,playerVars:{start:SEG.length?SEG[firstOf(K)].a:0,rel:0,playsinline:1},events:{onReady:()=>{ if(SEG.length) go(firstOf(K)); }}}); setInterval(tick,100); };
+let last=0; const curG=()=>cur>=0?gi(cur):last;
+document.getElementById("all").onclick=()=>{ auto.checked=true; go(0); };
+document.getElementById("replay").onclick=()=>goGroup(curG());
+document.getElementById("next").onclick=()=>goGroup(curG()+1);
+document.getElementById("nextseg").onclick=()=>{ const i=cur>=0?cur:firstOf(last); go(i+1); };
+document.getElementById("prev").onclick=()=>goGroup(curG()-1);
+setInterval(()=>{ if(cur>=0) last=gi(cur); },200);
 list.onclick=e=>{const li=e.target.closest("li"); if(li) go(+li.dataset.i)};
 if(!VID||!SEG.length) st("주소에 v(영상 ID)와 s(구간)가 필요합니다.");
-const s=document.createElement("script"); s.src="https://www.youtube.com/iframe_api"; document.head.appendChild(s);
+const sc=document.createElement("script"); sc.src="https://www.youtube.com/iframe_api"; document.head.appendChild(sc);
 </script></body></html>
